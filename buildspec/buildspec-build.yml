@@ -1,0 +1,102 @@
+version: 0.2
+
+env:
+  variables:
+    SYSTEM_NAME: example
+
+phases:
+  build:
+    commands:
+      - |
+        set -e
+
+        if [ "${BRANCH_NAME}" = "master" ]; then
+          Environment_Name="prd"
+        elif [ "${BRANCH_NAME}" = "development" ]; then
+          Environment_Name="dev"
+        fi
+        S3_SOURCE_BUCKET=${SYSTEM_NAME}-${Environment_Name}-s3-source
+        STACK_NAME=${SYSTEM_NAME}-${Environment_Name}-stack-cloudformation
+        CHANGE_SET_NAME=${STACK_NAME}-$(echo ${CODEBUILD_RESOLVED_SOURCE_VERSION} | cut -c1-8)
+
+        echo ""
+        echo "================================"
+        echo "CloudFormation ChangeSet Review"
+        echo "Stack ${STACK_NAME}"
+        echo "ChangeSet ${CHANGE_SET_NAME}"
+        echo "================================"
+        echo ""
+        echo "--------------------------------------------------"
+        echo "Step1 package template"
+        echo "--------------------------------------------------"
+        aws cloudformation package \
+          --template-file root.yml \
+          --s3-bucket ${S3_SOURCE_BUCKET} \
+          --output-template-file packaged.yml
+
+        echo ""
+        echo "--------------------------------------------------"
+        echo "Step2 create change set"
+        echo "--------------------------------------------------"
+        jq -s 'add' parameters/${Environment_Name}/*.json > combined_params.json
+        STACK_EXISTS=$(aws cloudformation describe-stacks \
+          --stack-name ${STACK_NAME} \
+          --query "Stacks[0].StackName" \
+          --output text 2>/dev/null || echo "false")
+        
+        if [ "${STACK_EXISTS}" = "false" ]; then
+          CHANGE_SET_TYPE="CREATE"
+        else
+          CHANGE_SET_TYPE="UPDATE"
+        fi
+        
+        echo "ChangeSetType: ${CHANGE_SET_TYPE}"
+        
+        aws cloudformation create-change-set \
+          --stack-name ${STACK_NAME} \
+          --change-set-type ${CHANGE_SET_TYPE} \
+          --template-body file://packaged.yml \
+          --parameters file://combined_params.json \
+          --change-set-name ${CHANGE_SET_NAME} \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --include-nested-stacks
+
+        aws cloudformation wait change-set-create-complete \
+          --stack-name ${STACK_NAME} \
+          --change-set-name ${CHANGE_SET_NAME} || true
+
+        echo ""
+        echo "--------------------------------------------------"
+        echo "Step3 root change set"
+        echo "--------------------------------------------------"
+        aws cloudformation describe-change-set \
+          --stack-name ${STACK_NAME} \
+          --change-set-name ${CHANGE_SET_NAME} \
+          --query "Changes[*].ResourceChange.[Action,LogicalResourceId,ResourceType]" \
+          --output table
+
+        echo ""
+        echo "--------------------------------------------------"
+        echo "Step4 nested stacks"
+        echo "--------------------------------------------------"
+
+        NESTED_CHANGESETS=$(aws cloudformation describe-change-set \
+          --stack-name ${STACK_NAME} \
+          --change-set-name ${CHANGE_SET_NAME} \
+          --query "Changes[?ResourceChange.ResourceType=='AWS::CloudFormation::Stack'].ResourceChange.ChangeSetId" \
+          --output text)
+
+        if [ -z "${NESTED_CHANGESETS}" ]; then
+          echo "No nested change sets"
+        else
+          for CS_ARN in ${NESTED_CHANGESETS}
+          do
+            echo ""
+            echo "Nested ChangeSet: ${CS_ARN}"
+
+            aws cloudformation describe-change-set \
+              --change-set-name ${CS_ARN} \
+              --query "Changes[*].ResourceChange.[Action,LogicalResourceId,ResourceType]" \
+              --output table
+          done
+        fi

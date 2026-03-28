@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  CommonEnvironmentName:
+    Type: String
+  CommonSystemName:
+    Type: String
+  SNSTopicDisplayName:
+    Type: String
+
+Resources:
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: stacks/iam.yml
+      Parameters:
+        CommonEnvironmentName: !Ref CommonEnvironmentName
+        CommonSystemName: !Ref CommonSystemName
+  
+  SNSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: stacks/sns.yml
+      Parameters:
+        CommonEnvironmentName: !Ref CommonEnvironmentName
+        CommonSystemName: !Ref CommonSystemName
+        SNSTopicDisplayName: !Ref SNSTopicDisplayName

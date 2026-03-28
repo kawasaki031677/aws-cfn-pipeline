@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  SystemName:
+    Type: String
+  PipelineAccountId:
+    Type: String
+  PipelineAccountSystemName:
+    Type: String
+
+Resources:
+  EventBridgeIAMManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${SystemName}-${EnvironmentName}-iamp-eventbridge"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - events:PutEvents
+            Resource: !Sub "arn:aws:events:ap-northeast-1:${PipelineAccountId}:event-bus/${PipelineAccountSystemName}-${EnvironmentName}-eventbus-pipeline"
+
+  EventBridgeIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${EnvironmentName}-iamr-eventbridge"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref EventBridgeIAMManagedPolicy
+
+  PipelineAccountIAMManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${SystemName}-${EnvironmentName}-iamp-pipelineaccount"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: !Sub "arn:aws:s3:::${PipelineAccountSystemName}-${EnvironmentName}-s3-artifacts/*"
+          - Effect: Allow
+            Action:
+              - kms:DescribeKey
+              - kms:GenerateDataKey*
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:Decrypt
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:UploadArchive
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:CancelUploadArchive
+            Resource: !GetAtt CodeCommitRepository.Arn
+
+  PipelineAccountIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${EnvironmentName}-iamr-pipelineaccount"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref PipelineAccountId
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref PipelineAccountIAMManagedPolicy
+
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Sub "${SystemName}-${EnvironmentName}-codecommit-repo"
+      RepositoryDescription: !Sub "CodeCommit repository for ${SystemName} in ${EnvironmentName} environment"
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${SystemName}-${EnvironmentName}-eventbridge-pipeline"
+      EventPattern:
+        source:
+          - "aws.codecommit"
+        detail-type:
+          - "CodeCommit Repository State Change"
+        resources:
+          - !GetAtt CodeCommitRepository.Arn
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Targets:
+        - Arn: !Sub "arn:aws:events:ap-northeast-1:${PipelineAccountId}:event-bus/${PipelineAccountSystemName}-${EnvironmentName}-eventbus-pipeline"
+          Id: "PipelineAccountEventBusTarget"
+          RoleArn: !GetAtt EventBridgeIAMRole.Arn

@@ -1,0 +1,28 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  cfn-lint:
+    name: CloudFormation Lint & YAML Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install linters
+        run: |
+          pip3 install -r requirements.txt
+
+      - name: Run cfn-lint on CloudFormation templates
+        run: |
+          echo "Checking CloudFormation templates with cfn-lint..."
+          find pipelines sample-iac -type f -name '*.yml' -print | xargs cfn-lint --ignore-checks=W3002

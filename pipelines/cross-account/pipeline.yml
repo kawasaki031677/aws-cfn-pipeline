@@ -1,0 +1,310 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  SystemName:
+    Type: String
+  SourceAccountId:
+    Type: String
+  SourceAccountSystemName:
+    Type: String
+
+Resources:
+  KMSArtifactKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "KMS key for encrypting artifacts in ${SystemName} pipeline"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: "key-default-1"
+        Statement:
+          - Sid: "Allow administration of the key"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:*
+            Resource: "*"
+          - Sid: "Allow Source Account to use the key"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${SourceAccountId}:root"
+            Action:
+              - kms:DescribeKey
+              - kms:GenerateDataKey*
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:Decrypt
+            Resource: "*"
+
+  KMSArtifactAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${SystemName}-${EnvironmentName}-kms-artifacts"
+      TargetKeyId: !Ref KMSArtifactKey
+
+  S3ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${SystemName}-${EnvironmentName}-s3-artifacts"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSArtifactKey
+
+  S3ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${SourceAccountId}:root"
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource:
+              - !Sub "arn:aws:s3:::${S3ArtifactBucket}/*"
+              - !Sub "arn:aws:s3:::${S3ArtifactBucket}"
+  
+  S3SourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${SystemName}-${EnvironmentName}-s3-source"
+      VersioningConfiguration:
+        Status: Enabled
+
+  CodeBuildIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${EnvironmentName}-iamr-codebuild"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: /
+
+  CodePipelineIAMManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${SystemName}-${EnvironmentName}-iamp-codepipeline"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetBucketVersioning
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: 
+              - !Sub "arn:aws:s3:::${S3ArtifactBucket}"
+              - !Sub "arn:aws:s3:::${S3ArtifactBucket}/*"
+          - Effect: Allow
+            Action:
+              - codebuild:BatchGetBuilds
+              - codebuild:StartBuild
+              - codebuild:BatchGetBuildBatches
+              - codebuild:StartBuildBatch
+            Resource: 
+              - !GetAtt CodeBuildProjectBuild.Arn
+              - !GetAtt CodeBuildProjectDeploy.Arn
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: 
+              - !Sub "arn:aws:iam::${SourceAccountId}:role/${SourceAccountSystemName}-${EnvironmentName}-iamr-pipelineaccount"
+
+  CodePipelineIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${EnvironmentName}-iamr-codepipeline"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref CodePipelineIAMManagedPolicy
+      Path: /
+
+  EventBridgeIAMManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${SystemName}-${EnvironmentName}-iamp-eventbridge"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - codepipeline:StartPipelineExecution
+            Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${SystemName}-${EnvironmentName}-codepipeline-pipeline"
+    
+  EventBridgeIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${EnvironmentName}-iamr-eventbridge"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref EventBridgeIAMManagedPolicy
+  
+  CodeBuildProjectBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${SystemName}-${EnvironmentName}-codebuild-build"
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !GetAtt CodeBuildIAMRole.Arn
+      Source:
+        BuildSpec: buildspec-build.yml
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+
+  CodeBuildProjectDeploy:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${SystemName}-${EnvironmentName}-codebuild-deploy"
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !GetAtt CodeBuildIAMRole.Arn
+      Source:
+        BuildSpec: buildspec-deploy.yml
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "${SystemName}-${EnvironmentName}-codepipeline-pipeline"
+      RoleArn: !GetAtt CodePipelineIAMRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref S3ArtifactBucket
+        EncryptionKey:
+          Type: KMS
+          Id: !GetAtt KMSArtifactKey.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                RepositoryName: !Sub "${SourceAccountSystemName}-${EnvironmentName}-codecommit-repo"
+                BranchName: master
+                PollForSourceChanges: false
+              Namespace: SourceVariables
+              RoleArn: !Sub "arn:aws:iam::${SourceAccountId}:role/${SourceAccountSystemName}-${EnvironmentName}-iamr-pipelineaccount"
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectBuild
+                EnvironmentVariables: |
+                  [{"name": "BRANCH_NAME", "value": "#{SourceVariables.BranchName}", "type": "PLAINTEXT"}]
+        - Name: Approve
+          Actions:
+            - Name: ApproveAction
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: 1
+              Configuration:
+                CustomData: "Please approve the deployment to production."
+        - Name: Deploy
+          Actions:
+            - Name: DeployAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectDeploy
+                EnvironmentVariables: |
+                  [{"name": "BRANCH_NAME", "value": "#{SourceVariables.BranchName}", "type": "PLAINTEXT"}]
+
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "${SystemName}-${EnvironmentName}-eventbus-pipeline"
+  
+  EventBusPolicy:
+    Type: AWS::Events::EventBusPolicy
+    Properties:
+      EventBusName: !Ref EventBus
+      StatementId: "AllowSourceAccountToPutEvents"
+      Statement:
+        Effect: Allow
+        Principal:
+          AWS: !Sub "arn:aws:iam::${SourceAccountId}:root"
+        Action: events:PutEvents
+        Resource: !GetAtt EventBus.Arn
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${SystemName}-${EnvironmentName}-eventbridge-pipeline"
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - "aws.codecommit"
+        detail-type:
+          - "CodeCommit Repository State Change"
+        resources:
+          - !Sub "arn:aws:codecommit:${AWS::Region}:${SourceAccountId}:${SourceAccountSystemName}-${EnvironmentName}-codecommit-repo"
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
+          Id: "CodePipelineTarget"
+          RoleArn: !GetAtt EventBridgeIAMRole.Arn

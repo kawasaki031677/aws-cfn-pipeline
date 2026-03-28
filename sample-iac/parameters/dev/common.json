@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "CommonEnvironmentName",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "CommonSystemName",
+    "ParameterValue": "example"
+  }
+]

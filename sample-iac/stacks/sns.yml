@@ -1,0 +1,16 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  CommonEnvironmentName:
+    Type: String
+  CommonSystemName:
+    Type: String
+  SNSTopicDisplayName:
+    Type: String
+
+Resources:
+  SNS:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${CommonSystemName}-${CommonEnvironmentName}-sns-topic"
+      DisplayName: !Ref SNSTopicDisplayName

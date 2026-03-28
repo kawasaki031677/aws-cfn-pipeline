@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "CommonEnvironmentName",
+    "ParameterValue": "prd"
+  },
+  {
+    "ParameterKey": "CommonSystemName",
+    "ParameterValue": "example"
+  }
+]
