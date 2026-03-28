@@ -105,23 +105,22 @@ aws cloudformation deploy \
 
 ### 2. クロスアカウントパイプライン
 
-#### a. パイプラインアカウント
-
-```sh
-aws cloudformation deploy \
-  --template-file ./pipelines/cross-account/pipeline.yml \
-  --stack-name pipeline-stack \
-  --parameter-overrides EnvironmentName=prd SystemName=example SourceAccountId=<SOURCE_ACCOUNT_ID> SourceAccountSystemName=source \
-  --capabilities CAPABILITY_NAMED_IAM
-```
-
-#### b. ソースアカウント
+#### a. ソースアカウント
 
 ```sh
 aws cloudformation deploy \
   --template-file ./pipelines/cross-account/source.yml \
   --stack-name source-stack \
   --parameter-overrides EnvironmentName=prd SystemName=source PipelineAccountId=<PIPELINE_ACCOUNT_ID> PipelineAccountSystemName=example \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+#### b. パイプラインアカウント
+
+```sh
+aws cloudformation deploy \
+  --template-file ./pipelines/cross-account/pipeline.yml \
+  --stack-name pipeline-stack \
+  --parameter-overrides EnvironmentName=prd SystemName=example SourceAccountId=<SOURCE_ACCOUNT_ID> SourceAccountSystemName=source \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
