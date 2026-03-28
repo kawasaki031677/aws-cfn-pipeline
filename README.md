@@ -144,3 +144,4 @@ aws cloudformation deploy \
 - `eventbridge`, `iam`, `s3`, `kms` などの権限は最小権限ポリシーに調整してください。
 
 ---
+test
