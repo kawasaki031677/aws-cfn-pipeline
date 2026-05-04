@@ -10,21 +10,24 @@ phases:
       - |
         set -e
 
+        export EXECUTION_ID=$(echo $PIPELINE_EXECUTION_ID | cut -c 1-8)
+        echo "Short ID is ${EXECUTION_ID}"
+
         if [ "${BRANCH_NAME}" = "master" ]; then
           Environment_Name="prd"
         elif [ "${BRANCH_NAME}" = "development" ]; then
           Environment_Name="dev"
         fi
         STACK_NAME=${SYSTEM_NAME}-${Environment_Name}-stack-cloudformation
-        CHANGE_SET_NAME=${STACK_NAME}-$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
+        CHANGE_SET_NAME=${STACK_NAME}-$(echo ${EXECUTION_ID} | cut -c1-8)
 
         echo ""
         echo "================================"
         echo "CloudFormation Execution"
-        echo "Stack $STACK_NAME"
-        echo "ChangeSet $CHANGE_SET_NAME"
+        echo "Stack ${STACK_NAME}"
+        echo "ChangeSet ${CHANGE_SET_NAME}"
         echo "================================"
 
         aws cloudformation execute-change-set \
           --stack-name ${STACK_NAME} \
-          --change-set-name $CHANGE_SET_NAME
+          --change-set-name ${CHANGE_SET_NAME}

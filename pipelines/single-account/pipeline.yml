@@ -187,7 +187,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref CodeBuildProjectBuild
                 EnvironmentVariables: |
-                  [{"name": "BRANCH_NAME", "value": "#{SourceVariables.BranchName}", "type": "PLAINTEXT"}]
+                  [{"name": "BRANCH_NAME", "value": "#{SourceVariables.BranchName}", "type": "PLAINTEXT"},{"name": "PIPELINE_EXECUTION_ID", "value": "#{codepipeline.PipelineExecutionId}", "type": "PLAINTEXT"}]
         - Name: Approve
           Actions:
             - Name: ApproveAction
@@ -211,7 +211,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref CodeBuildProjectDeploy
                 EnvironmentVariables: |
-                  [{"name": "BRANCH_NAME", "value": "#{SourceVariables.BranchName}", "type": "PLAINTEXT"}]
+                  [{"name": "BRANCH_NAME", "value": "#{SourceVariables.BranchName}", "type": "PLAINTEXT"},{"name": "PIPELINE_EXECUTION_ID", "value": "#{codepipeline.PipelineExecutionId}", "type": "PLAINTEXT"}]
 
   EventBridgeRule:
     Type: AWS::Events::Rule
